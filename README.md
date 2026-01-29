@@ -1,17 +1,17 @@
 # Multi-Modal RAG-Based QA System
 
-A specialized Retrieval-Augmented Generation (RAG) system designed to handle complex financial documents. This project moves beyond simple text extraction by handling **Tables**, **Images (OCR)**, and **Structured Text** as distinct modalities.
+A specialized Retrieval-Augmented Generation (RAG) system designed to handle complex financial documents. This project moves beyond simple text extraction by handling Table, Images (OCR), and Structured Text as distinct modalities.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B)
 ![LangChain](https://img.shields.io/badge/LangChain-Framework-green)
 
-## 🚀 Key Features
+## Key Features
 
 *   **Multi-Modal Ingestion**:
     *   **Text**: Recursive Character Splitting for semantic coherence.
-    *   **Tables**: extracted via `pdfplumber` and formatted as Markdown to preserve row/column relationships.
-    *   **Images**: OCR via `pytesseract` to unlock data in charts and scanned pages.
+    *   **Tables**: extracted via pdfplumber and formatted as Markdown to preserve row/column relationships.
+    *   **Images**: OCR via pytesseract to unlock data in charts and scanned pages.
 *   **Hybrid Search Engine**:
     *   Combines **Dense Vector Search** (FAISS + all-MiniLM-L6-v2) for semantic understanding.
     *   Combines **Sparse Keyword Search** (BM25) for precise term matching.
@@ -20,7 +20,7 @@ A specialized Retrieval-Augmented Generation (RAG) system designed to handle com
 *   **Local Privacy**: Runs entirely locally using HuggingFace pipelines (no external API keys required).
 *   **Interactive UI**: Streamlit dashboard with citation transparency and performance evaluation.
 
-## 🛠️ Installation
+## Installation
 
 ### 1. Clone the Repository
 ```bash
@@ -34,12 +34,12 @@ pip install -r requirements.txt
 ```
 
 ### 3. Install Tesseract OCR
-This project uses `pytesseract` for image OCR. You must have Tesseract installed on your system:
-*   **Windows**: [Download Installer](https://github.com/UB-Mannheim/tesseract/wiki) and add it to your PATH.
-*   **Linux**: `sudo apt install tesseract-ocr`
-*   **Mac**: `brew install tesseract`
+This project uses pytesseract for image OCR. You must have Tesseract installed on your system:
+*   **Windows**: Download Installer and add it to your PATH.
+*   **Linux**: sudo apt install tesseract-ocr
+*   **Mac**: brew install tesseract
 
-## 🏃‍♂️ Usage
+## Usage
 
 Run the Streamlit application:
 
@@ -52,21 +52,18 @@ streamlit run app.py
 3.  **Chat**: Ask questions like "What are the key fiscal indicators for 2024?".
 4.  **Verify**: Expand the "References" citations to see the exact text/table rows used for the answer.
 
-## 🏗️ Architecture
+## Architecture
 
 For a deep dive into the system design, please refer to:
-*   [Technical Report](Technical_Report.md) - Detailed design choices.
-*   [Architecture Diagrams](Architecture_Diagrams.md) - Visualizing the ingestion and retrieval flows.
+*   [Technical Report](docs/Technical_Report.md)
+*   [Architecture Diagrams](docs/Architecture_Diagrams.md)
 
-## 📂 Project Structure
+## Project Structure
 
 *   `app.py`: Main Streamlit application.
-*   `document_processor.py`: Handles PDF parsing (Text, Tables, OCR).
-*   `vector_store.py`: Manages FAISS and BM25 indices.
-*   `llm_qa.py`: RAG logic (Hybrid Search, Reranking, Generation).
-*   `evaluate.py`: Benchmarking suite for latency and accuracy.
+*   `modules/`: Core logic files.
+    *   `document_processor.py`: Handles PDF parsing.
+    *   `vector_store.py`: Manages indices.
+    *   `llm_qa.py`: RAG logic.
 *   `data/`: Stores processed chunks and vector indices.
-
-## 📝 License
-
-[MIT](LICENSE)
+*   `docs/`: Documentation and diagrams.

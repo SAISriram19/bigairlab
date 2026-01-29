@@ -1,7 +1,7 @@
 import json
 import os
-from vector_store import VectorStore
-import config
+from modules.vector_store import VectorStore
+import modules.config as config
 
 def main():
     print("STEP 2: Creating Embeddings")

@@ -1,7 +1,7 @@
 import json
 import os
-from document_processor import DocumentProcessor
-import config
+from modules.document_processor import DocumentProcessor
+import modules.config as config
 
 def main():
     print("="*70)

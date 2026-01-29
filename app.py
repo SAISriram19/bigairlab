@@ -1,13 +1,13 @@
 import streamlit as st
 import os
 import shutil
-from vector_store import VectorStore
-from llm_qa import LLMQA, SimpleQA
-import config
-from document_processor import DocumentProcessor
+from modules.vector_store import VectorStore
+from modules.llm_qa import LLMQA, SimpleQA
+import modules.config as config
+from modules.document_processor import DocumentProcessor
 import json
 import pandas as pd
-from evaluate import RAGEvaluator
+from modules.evaluate import RAGEvaluator
 
 st.set_page_config(
     page_title="RAG Multi-Modal System",
