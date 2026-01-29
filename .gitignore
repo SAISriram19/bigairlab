@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Data & Models (Local only)
+data/processed/
+data/vector_store/
+data/images/
+temp_upload/
+benchmark_results.csv
+
+# Environment Variables
+.env
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PDF Files (if you don't want to track the source PDFs)
+*.pdf
