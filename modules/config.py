@@ -15,6 +15,14 @@ VECTOR_STORE_PATH = os.path.join(VECTOR_STORE_DIR, 'faiss_index')
 EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 LLM_MODEL = 'google/flan-t5-base'
 
+# Magic Numbers / Constants
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
+MAX_NEW_TOKENS = 512
+TEMPERATURE = 0.3
+REPETITION_PENALTY = 1.15
+MAX_FILE_SIZE_MB = 10
+
 def create_directories():
     directories = [
         DATA_DIR,
@@ -26,14 +34,3 @@ def create_directories():
 
     for directory in directories:
         os.makedirs(directory, exist_ok=True)
-
-    print("✓ All directories created")
-
-if __name__ == "__main__":
-    create_directories()
-    print(f"\nDirectory structure:")
-    print(f"  Raw data: {RAW_DATA_DIR}")
-    print(f"  Processed data: {PROCESSED_DATA_DIR}")
-    print(f"  Vector store: {VECTOR_STORE_DIR}")
-    print(f"  Images: {IMAGES_DIR}")
-    print(f"\nPDF should be placed at: {PDF_PATH}")

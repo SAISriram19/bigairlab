@@ -17,3 +17,4 @@ numpy
 pdfplumber
 rank_bm25
 langchain-text-splitters
+pytest

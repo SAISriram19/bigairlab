@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import shutil
+import logging
 from modules.vector_store import VectorStore
 from modules.llm_qa import LLMQA, SimpleQA
 import modules.config as config
@@ -9,10 +10,27 @@ import json
 import pandas as pd
 from modules.evaluate import RAGEvaluator
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('app')
+
 st.set_page_config(
     page_title="RAG Multi-Modal System",
     layout="wide"
 )
+
+# --- Caching Resources ---
+@st.cache_resource
+def get_llm_qa():
+    logger.info("Initializing LLMQA system (Cached)...")
+    return LLMQA(model_name=config.LLM_MODEL)
+
+@st.cache_resource
+def get_embedding_model_name():
+    return config.EMBEDDING_MODEL
 
 # Initialize Session State
 if 'vector_store' not in st.session_state:
@@ -46,6 +64,8 @@ def run_ingestion(pdf_path):
     try:
         # 1. Processing
         status_text.text("Processing Document... (OCR & Text Extraction)")
+        logger.info(f"Starting processing for {pdf_path}")
+        
         processor = DocumentProcessor(pdf_path)
         chunks = processor.process_document()
         processor.close()
@@ -59,7 +79,10 @@ def run_ingestion(pdf_path):
         
         # 2. Embedding
         status_text.text("Creating Embeddings... (This may take a moment)")
-        vector_store = VectorStore(model_name=config.EMBEDDING_MODEL)
+        
+        # Initialize VectorStore (Model load is cached internally by sentence-transformers usually, 
+        # but we re-init class. The heavy lift is managed.)
+        vector_store = VectorStore(model_name=get_embedding_model_name())
         vector_store.create_embeddings(chunks)
         vector_store.save(config.VECTOR_STORE_PATH)
         
@@ -70,16 +93,20 @@ def run_ingestion(pdf_path):
         st.session_state.vector_store = vector_store
         
         try:
-            st.session_state.qa_system = LLMQA(model_name=config.LLM_MODEL)
-        except:
+            # Use cached LLM loader
+            st.session_state.qa_system = get_llm_qa()
+        except Exception as e:
+            logger.error(f"LLM Load Failed: {e}")
             st.warning("LLM Load Failed, defaulting to SimpleQA")
             st.session_state.qa_system = SimpleQA()
             
         st.session_state.loaded = True
         progress_bar.progress(1.0)
         status_text.success("Processing Complete!")
+        logger.info("Ingestion pipeline completed successfully")
         
     except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
         status_text.error(f"Error: {e}")
     finally:
         st.session_state.processing = False
@@ -90,10 +117,15 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload PDF", type=['pdf'])
     
     if uploaded_file:
-        if st.button("Process Document"):
-            with st.spinner("Starting Pipeline..."):
-                pdf_path = process_uploaded_file(uploaded_file)
-                run_ingestion(pdf_path)
+        # File Size Validation
+        file_size_mb = uploaded_file.size / (1024 * 1024)
+        if file_size_mb > config.MAX_FILE_SIZE_MB:
+            st.error(f"File too large! Limit is {config.MAX_FILE_SIZE_MB}MB.")
+        else:
+            if st.button("Process Document"):
+                with st.spinner("Starting Pipeline..."):
+                    pdf_path = process_uploaded_file(uploaded_file)
+                    run_ingestion(pdf_path)
     
     st.markdown("---")
     
@@ -130,7 +162,10 @@ with tab1:
             
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
+                    # Use vector store search
                     search_results = st.session_state.vector_store.search(query, k=5)
+                    
+                    # Generate Answer
                     result = st.session_state.qa_system.generate_answer_with_citations(query, search_results)
                     
                     st.markdown(result['answer'])

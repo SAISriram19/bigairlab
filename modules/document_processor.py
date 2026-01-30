@@ -4,13 +4,17 @@ from PIL import Image
 import pytesseract
 import io
 import os
+import logging
+from modules import config
+
+logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     def __init__(self, pdf_path):
         self.pdf_path = pdf_path
         self.doc = fitz.open(pdf_path)
 
-    def extract_text_chunks(self, chunk_size=1000, chunk_overlap=200):
+    def extract_text_chunks(self, chunk_size=config.CHUNK_SIZE, chunk_overlap=config.CHUNK_OVERLAP):
         # Improved chunking using method from implementation plan
         from langchain_text_splitters import RecursiveCharacterTextSplitter
         
@@ -63,17 +67,13 @@ class DocumentProcessor:
                                     'source': f'Table {i+1} on Page {page_num + 1}'
                                 })
         except Exception as e:
-            print(f"Error extracting tables with pdfplumber: {e}")
+            logger.error(f"Error extracting tables with pdfplumber: {e}")
 
         return tables
 
     def extract_images_with_ocr(self, output_folder=None):
         if output_folder is None:
-            try:
-                import config
-                output_folder = config.IMAGES_DIR
-            except:
-                output_folder = 'extracted_images'
+            output_folder = config.IMAGES_DIR
 
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -106,24 +106,24 @@ class DocumentProcessor:
                             'source': f'Image on Page {page_num + 1}'
                         })
                 except Exception as e:
-                    print(f"OCR failed on page {page_num + 1}: {e}")
+                    logger.warning(f"OCR failed on page {page_num + 1}: {e}")
 
         return images_data
 
     def process_document(self):
-        print(f"Processing document: {self.pdf_path}")
+        logger.info(f"Processing document: {self.pdf_path}")
 
         text_chunks = self.extract_text_chunks()
-        print(f"Extracted {len(text_chunks)} text chunks")
+        logger.info(f"Extracted {len(text_chunks)} text chunks")
 
         tables = self.extract_tables()
-        print(f"Extracted {len(tables)} tables")
+        logger.info(f"Extracted {len(tables)} tables")
 
         images = self.extract_images_with_ocr()
-        print(f"Extracted {len(images)} images with OCR")
+        logger.info(f"Extracted {len(images)} images with OCR")
 
         all_chunks = text_chunks + tables + images
-        print(f" Total chunks: {len(all_chunks)}")
+        logger.info(f"Total chunks: {len(all_chunks)}")
 
         return all_chunks
 

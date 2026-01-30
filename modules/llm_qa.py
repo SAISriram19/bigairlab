@@ -2,17 +2,21 @@ from langchain_huggingface import HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from sentence_transformers import CrossEncoder
 import torch
+import logging
+from modules import config
+
+logger = logging.getLogger(__name__)
 
 class LLMQA:
     def __init__(self, model_name='google/flan-t5-base'):
-        print(f"Loading LLM model via LangChain: {model_name}")
+        logger.info(f"Loading LLM model via LangChain: {model_name}")
 
         device = 0 if torch.cuda.is_available() else -1
         device_name = 'GPU' if device == 0 else 'CPU'
 
         try:
             # Load Cross Encoder for Reranking
-            print("Loading CrossEncoder for Reranking...")
+            logger.info("Loading CrossEncoder for Reranking...")
             self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
             tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -22,11 +26,11 @@ class LLMQA:
                 "text2text-generation",
                 model=model,
                 tokenizer=tokenizer,
-                max_new_tokens=512, # Increased for CoT
+                max_new_tokens=config.MAX_NEW_TOKENS,
                 device=device,
                 do_sample=True,
-                temperature=0.3, # Lower temperature for factual accuracy
-                repetition_penalty=1.15 # Prevent repetition loops
+                temperature=config.TEMPERATURE,
+                repetition_penalty=config.REPETITION_PENALTY
             )
             self.llm = HuggingFacePipeline(pipeline=pipe)
 
@@ -46,10 +50,10 @@ Question: {question}
 
 Answer:"""
 
-            print(f"LangChain LLM loaded on {device_name}")
+            logger.info(f"LangChain LLM loaded on {device_name}")
 
         except Exception as e:
-            print(f"Error loading model: {e}")
+            logger.error(f"Error loading model: {e}")
             raise
 
     def rephrase_question(self, query, chat_history):
@@ -70,10 +74,10 @@ Standalone Question:"""
         try:
             result = self.llm.invoke(prompt)
             standalone_question = result.strip()
-            print(f"Original: {query} -> Rephrased: {standalone_question}")
+            logger.debug(f"Original: {query} -> Rephrased: {standalone_question}")
             return standalone_question
         except Exception as e:
-            print(f"Error rephrasing question: {e}")
+            logger.error(f"Error rephrasing question: {e}")
             return query
 
     def generate_answer(self, query, context_chunks):
@@ -92,7 +96,7 @@ Standalone Question:"""
             answer = result.strip()
 
         except Exception as e:
-            print(f"Error generating answer: {e}")
+            logger.error(f"Error generating answer: {e}")
             answer = "Sorry, I encountered an error generating the answer."
 
         return answer
@@ -106,7 +110,7 @@ Standalone Question:"""
             }
 
         # --- RERANKING STEP ---
-        print(f"Reranking {len(search_results)} candidates...")
+        logger.info(f"Reranking {len(search_results)} candidates...")
         
         pass_chunks = [result['chunk'] for result in search_results]
         cross_inp = [[query, chunk['content']] for chunk in pass_chunks]
@@ -167,14 +171,14 @@ Standalone Question:"""
             result = self.llm.invoke(prompt)
             summary = result.strip()
         except Exception as e:
-            print(f"Error generating summary: {e}")
+            logger.error(f"Error generating summary: {e}")
             summary = "Sorry, I encountered an error generating the summary."
 
         return summary
 
 class SimpleQA:
     def __init__(self):
-        print()
+        logger.info("Initializing SimpleQA (Fallback)")
 
     def generate_answer_with_citations(self, query, search_results):
         if not search_results:
@@ -212,7 +216,8 @@ class SimpleQA:
         }
 
 if __name__ == "__main__":
-
+    logging.basicConfig(level=logging.INFO) # Setup logging for standalone run
+    
     test_results = [
         {
             'chunk': {

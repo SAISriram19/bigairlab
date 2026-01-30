@@ -28,3 +28,6 @@ Thumbs.db
 
 # PDF Files (if you don't want to track the source PDFs)
 *.pdf
+
+# Tests
+tests/

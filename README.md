@@ -58,12 +58,18 @@ For a deep dive into the system design, please refer to:
 *   [Technical Report](docs/Technical_Report.md)
 *   [Architecture Diagrams](docs/Architecture_Diagrams.md)
 
+## Development
+
+### Running Tests
+To run the automated test suite:
+```bash
+python -m pytest tests/
+```
+
 ## Project Structure
 
 *   `app.py`: Main Streamlit application.
-*   `modules/`: Core logic files.
-    *   `document_processor.py`: Handles PDF parsing.
-    *   `vector_store.py`: Manages indices.
-    *   `llm_qa.py`: RAG logic.
+*   `modules/`: Core logic files (Config, Processor, VectorStore, LLMQA).
 *   `data/`: Stores processed chunks and vector indices.
 *   `docs/`: Documentation and diagrams.
+*   `tests/`: Unit tests.
