@@ -1,8 +1,8 @@
 import time
 import pandas as pd
-from vector_store import VectorStore
-from llm_qa import LLMQA, SimpleQA
-import config
+from modules.vector_store import VectorStore
+from modules.llm_qa import LLMQA, SimpleQA
+from modules import config
 
 class RAGEvaluator:
     def __init__(self):
@@ -38,26 +38,45 @@ class RAGEvaluator:
         
         print(f"Running benchmark on {len(queries)} queries...")
         
-        for q in queries:
+        for i, q in enumerate(queries, 1):
+            print(f"Processing query {i}/{len(queries)}: {q[:50]}...")
+            
             start_time = time.time()
             
-            # 1. Retrieval
+            # 1. Retrieval timing
+            retrieval_start = time.time()
             search_results = self.vector_store.search(q, k=5)
+            retrieval_time = time.time() - retrieval_start
             
-            # 2. Generation
+            # 2. Generation timing
+            generation_start = time.time()
             response = self.qa_system.generate_answer_with_citations(q, search_results)
+            generation_time = time.time() - generation_start
             
-            latency = time.time() - start_time
+            total_latency = time.time() - start_time
             
             results.append({
                 "Query": q,
-                "Latency (s)": round(latency, 2),
+                "Total Latency (s)": round(total_latency, 2),
+                "Retrieval Time (s)": round(retrieval_time, 2),
+                "Generation Time (s)": round(generation_time, 2),
                 "Sources Found": len(response['citations']),
                 "Top Source Type": response['citations'][0]['type'] if response['citations'] else "N/A",
                 "Answer Length": len(response['answer'])
             })
+            
+            print(f"  - Retrieval: {retrieval_time:.2f}s, Generation: {generation_time:.2f}s, Total: {total_latency:.2f}s")
 
         df = pd.DataFrame(results)
+        
+        # Print summary statistics
+        print(f"\nPERFORMANCE SUMMARY")
+        print(f"Average Total Latency: {df['Total Latency (s)'].mean():.2f}s")
+        print(f"Average Retrieval Time: {df['Retrieval Time (s)'].mean():.2f}s")
+        print(f"Average Generation Time: {df['Generation Time (s)'].mean():.2f}s")
+        print(f"Retrieval % of total: {(df['Retrieval Time (s)'].mean() / df['Total Latency (s)'].mean() * 100):.1f}%")
+        print(f"Generation % of total: {(df['Generation Time (s)'].mean() / df['Total Latency (s)'].mean() * 100):.1f}%")
+        
         return df
 
 if __name__ == "__main__":

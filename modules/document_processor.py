@@ -10,12 +10,36 @@ from modules import config
 logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
+    """
+    Multi-modal document processor for extracting text, tables, and images from PDFs.
+    
+    Handles:
+    - Text extraction with semantic chunking
+    - Table extraction with markdown formatting
+    - Image extraction with OCR processing
+    """
+    
     def __init__(self, pdf_path):
+        """
+        Initialize document processor.
+        
+        Args:
+            pdf_path: Path to the PDF file to process
+        """
         self.pdf_path = pdf_path
         self.doc = fitz.open(pdf_path)
 
     def extract_text_chunks(self, chunk_size=config.CHUNK_SIZE, chunk_overlap=config.CHUNK_OVERLAP):
-        # Improved chunking using method from implementation plan
+        """
+        Extract and chunk text from PDF using semantic-aware splitting.
+        
+        Args:
+            chunk_size: Maximum size of each chunk
+            chunk_overlap: Overlap between consecutive chunks
+            
+        Returns:
+            List of text chunks with metadata
+        """
         from langchain_text_splitters import RecursiveCharacterTextSplitter
         
         chunks = []
@@ -32,17 +56,24 @@ class DocumentProcessor:
             if text.strip():
                 page_chunks = text_splitter.split_text(text)
                 
-                for chunk_text in page_chunks:
+                for i, chunk_text in enumerate(page_chunks):
                     chunks.append({
                         'type': 'text',
-                        'content': chunk_text,
+                        'content': chunk_text.strip(),
                         'page': page_num + 1,
-                        'source': f'Page {page_num + 1}'
+                        'source': f'Page {page_num + 1}, Chunk {i + 1}',
+                        'chunk_index': i
                     })
 
         return chunks
 
     def extract_tables(self):
+        """
+        Extract tables from PDF and convert to structured format.
+        
+        Returns:
+            List of table chunks with metadata
+        """
         tables = []
 
         try:
@@ -51,27 +82,58 @@ class DocumentProcessor:
                     extracted_tables = page.extract_tables()
 
                     for i, table in enumerate(extracted_tables):
-                        if table:
-                            # Convert table to string format
-                            table_text = ""
-                            for row in table:
-                                # Filter out None values and join
-                                row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
-                                table_text += row_text + "\n"
+                        if table and len(table) > 1:  # Ensure table has header + data
+                            # Convert table to markdown format for better structure
+                            table_text = self._format_table_as_markdown(table)
 
                             if table_text.strip():
                                 tables.append({
                                     'type': 'table',
                                     'content': table_text,
                                     'page': page_num + 1,
-                                    'source': f'Table {i+1} on Page {page_num + 1}'
+                                    'source': f'Table {i+1} on Page {page_num + 1}',
+                                    'table_index': i,
+                                    'row_count': len(table),
+                                    'col_count': len(table[0]) if table else 0
                                 })
         except Exception as e:
             logger.error(f"Error extracting tables with pdfplumber: {e}")
 
         return tables
+    
+    def _format_table_as_markdown(self, table):
+        """Convert table to markdown format for better structure preservation."""
+        if not table:
+            return ""
+            
+        markdown_lines = []
+        
+        # Process header
+        if table[0]:
+            header = " | ".join([str(cell) if cell is not None else "" for cell in table[0]])
+            markdown_lines.append(header)
+            # Add separator
+            separator = " | ".join(["---"] * len(table[0]))
+            markdown_lines.append(separator)
+        
+        # Process data rows
+        for row in table[1:]:
+            if row:
+                row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
+                markdown_lines.append(row_text)
+        
+        return "\n".join(markdown_lines)
 
     def extract_images_with_ocr(self, output_folder=None):
+        """
+        Extract images from PDF and perform OCR to extract text.
+        
+        Args:
+            output_folder: Directory to save extracted images
+            
+        Returns:
+            List of image chunks with OCR text and metadata
+        """
         if output_folder is None:
             output_folder = config.IMAGES_DIR
 
@@ -85,28 +147,41 @@ class DocumentProcessor:
             image_list = page.get_images()
 
             for img_index, img in enumerate(image_list):
-                xref = img[0]
-                base_image = self.doc.extract_image(xref)
-                image_bytes = base_image["image"]
-
-                image_filename = f"{output_folder}/page{page_num+1}_img{img_index+1}.png"
-                with open(image_filename, "wb") as image_file:
-                    image_file.write(image_bytes)
-
                 try:
+                    xref = img[0]
+                    base_image = self.doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+
+                    image_filename = f"{output_folder}/page{page_num+1}_img{img_index+1}.png"
+                    
+                    # Save image file
+                    with open(image_filename, "wb") as image_file:
+                        image_file.write(image_bytes)
+
+                    # Perform OCR
                     img_pil = Image.open(io.BytesIO(image_bytes))
-                    ocr_text = pytesseract.image_to_string(img_pil)
+                    
+                    # Enhance image for better OCR if needed
+                    if img_pil.mode != 'RGB':
+                        img_pil = img_pil.convert('RGB')
+                    
+                    ocr_text = pytesseract.image_to_string(img_pil, config='--psm 6')
 
                     if ocr_text.strip():
                         images_data.append({
                             'type': 'image',
-                            'content': ocr_text,
+                            'content': ocr_text.strip(),
                             'page': page_num + 1,
                             'image_path': image_filename,
-                            'source': f'Image on Page {page_num + 1}'
+                            'source': f'Image {img_index + 1} on Page {page_num + 1}',
+                            'image_index': img_index,
+                            'image_size': len(image_bytes)
                         })
+                    else:
+                        logger.debug(f"No text found in image on page {page_num + 1}")
+                        
                 except Exception as e:
-                    logger.warning(f"OCR failed on page {page_num + 1}: {e}")
+                    logger.warning(f"Failed to process image {img_index + 1} on page {page_num + 1}: {e}")
 
         return images_data
 

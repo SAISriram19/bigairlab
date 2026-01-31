@@ -1,3 +1,4 @@
+import time
 from langchain_huggingface import HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from sentence_transformers import CrossEncoder
@@ -8,7 +9,22 @@ from modules import config
 logger = logging.getLogger(__name__)
 
 class LLMQA:
+    """
+    LLM-based Question Answering system with cross-encoder reranking.
+    
+    Features:
+    - HuggingFace transformer models via LangChain
+    - Cross-encoder reranking for improved relevance
+    - Citation generation with source tracking
+    """
+    
     def __init__(self, model_name='google/flan-t5-base'):
+        """
+        Initialize LLM QA system.
+        
+        Args:
+            model_name: Name of the HuggingFace model to use
+        """
         logger.info(f"Loading LLM model via LangChain: {model_name}")
 
         device = 0 if torch.cuda.is_available() else -1
@@ -81,10 +97,24 @@ Standalone Question:"""
             return query
 
     def generate_answer(self, query, context_chunks):
-        context_text = "\n\n".join([
-            f"[Source: {chunk['source']}]\n{chunk['content']}"
-            for chunk in context_chunks[:3]
-        ])
+        """Generate answer from context chunks with length optimization."""
+        # Limit context length for faster processing
+        context_parts = []
+        total_length = 0
+        
+        for chunk in context_chunks:
+            chunk_text = f"[Source: {chunk['source']}]\n{chunk['content']}"
+            if total_length + len(chunk_text) > config.MAX_CONTEXT_LENGTH:
+                # Truncate the chunk to fit within limit
+                remaining_space = config.MAX_CONTEXT_LENGTH - total_length
+                if remaining_space > 100:  # Only add if meaningful space left
+                    truncated_chunk = chunk_text[:remaining_space-3] + "..."
+                    context_parts.append(truncated_chunk)
+                break
+            context_parts.append(chunk_text)
+            total_length += len(chunk_text)
+
+        context_text = "\n\n".join(context_parts)
 
         prompt = self.prompt_template.format(
             context=context_text,
@@ -102,6 +132,17 @@ Standalone Question:"""
         return answer
 
     def generate_answer_with_citations(self, query, search_results, chat_history=None):
+        """
+        Generate answer with citations using reranking for improved relevance.
+        
+        Args:
+            query: User question
+            search_results: Results from vector store search
+            chat_history: Previous conversation context
+            
+        Returns:
+            Dict with answer, citations, and metadata
+        """
         if not search_results:
              return {
                 'answer': "I cannot find relevant information in the document.",
@@ -109,34 +150,44 @@ Standalone Question:"""
                 'context_used': 0
             }
 
-        # --- RERANKING STEP ---
+        # Rerank results using cross-encoder
         logger.info(f"Reranking {len(search_results)} candidates...")
         
-        pass_chunks = [result['chunk'] for result in search_results]
-        cross_inp = [[query, chunk['content']] for chunk in pass_chunks]
-        
-        cross_scores = self.cross_encoder.predict(cross_inp)
-        
-        # Combine chunk with new score
-        reranked_results = []
-        for i, score in enumerate(cross_scores):
-            reranked_results.append({
-                'chunk': pass_chunks[i],
-                'score': float(score), # Convert numpy float to python float
-                'rank': i + 1 # Use current index as temp rank
-            })
+        try:
+            chunks = [result['chunk'] for result in search_results]
+            cross_inputs = [[query, chunk['content']] for chunk in chunks]
             
-        # Sort by Cross-Encoder score (High is better)
-        reranked_results.sort(key=lambda x: x['score'], reverse=True)
-        
-        # Take Top-3 most relevant after reranking
-        top_k_results = reranked_results[:3]
+            cross_scores = self.cross_encoder.predict(cross_inputs)
+            
+            # Combine chunks with reranking scores
+            reranked_results = []
+            for i, score in enumerate(cross_scores):
+                reranked_results.append({
+                    'chunk': chunks[i],
+                    'score': float(score),
+                    'original_rank': i + 1,
+                    'original_score': search_results[i]['score']
+                })
+                
+            # Sort by cross-encoder score (higher is better)
+            reranked_results.sort(key=lambda x: x['score'], reverse=True)
+            
+            # Take top results for context
+            top_k_results = reranked_results[:config.RERANK_TOP_K]
+            
+        except Exception as e:
+            logger.error(f"Reranking failed: {e}")
+            # Fallback to original search results
+            '''top_k_results = search_results[:config.RERANK_TOP_K]
+            for result in top_k_results:
+                result['score'] = result.get('score', 0.0)'''
         
         context_chunks = [result['chunk'] for result in top_k_results]
 
-        # Use the original query (or rephrased one passed in) for generation
+        # Generate answer
         answer = self.generate_answer(query, context_chunks)
 
+        # Create citations
         citations = []
         for i, result in enumerate(top_k_results):
             chunk = result['chunk']
@@ -145,13 +196,15 @@ Standalone Question:"""
                 'source': chunk['source'],
                 'page': chunk['page'],
                 'type': chunk['type'],
-                'relevance_score': result['score']
+                'relevance_score': result['score'],
+                'content_preview': chunk['content'][:100] + "..." if len(chunk['content']) > 100 else chunk['content']
             })
 
         return {
             'answer': answer,
             'citations': citations,
-            'context_used': len(context_chunks)
+            'context_used': len(context_chunks),
+            'total_candidates': len(search_results)
         }
 
     def generate_summary(self, context_chunks):
@@ -177,27 +230,45 @@ Standalone Question:"""
         return summary
 
 class SimpleQA:
+    """Fallback QA system when LLM loading fails."""
+    
     def __init__(self):
         logger.info("Initializing SimpleQA (Fallback)")
 
     def generate_answer_with_citations(self, query, search_results):
+        """
+        Generate simple answer by combining top search results.
+        
+        Args:
+            query: User question
+            search_results: Results from vector store search
+            
+        Returns:
+            Dict with answer and citations
+        """
         if not search_results:
             return {
                 'answer': "No relevant information found in the document.",
                 'citations': [],
                 'context_used': 0
             }
+            
+        # Take top 3 results
         top_chunks = search_results[:3]
 
+        # Create a more structured answer
         answer_parts = []
-        for result in top_chunks:
+        answer_parts.append(f"Based on the document, here's what I found regarding '{query}':\n")
+        
+        for i, result in enumerate(top_chunks, 1):
             chunk = result['chunk']
-            snippet = chunk['content'][:200].strip()
+            snippet = chunk['content'][:300].strip()
             if snippet:
-                answer_parts.append(f"From {chunk['source']}: {snippet}...")
+                answer_parts.append(f"{i}. From {chunk['source']}: {snippet}...")
 
-        answer = "\n\n".join(answer_parts) if answer_parts else "No relevant information found."
+        answer = "\n\n".join(answer_parts) if len(answer_parts) > 1 else "No relevant information found."
 
+        # Create citations
         citations = []
         for i, result in enumerate(top_chunks):
             chunk = result['chunk']
@@ -206,13 +277,15 @@ class SimpleQA:
                 'source': chunk['source'],
                 'page': chunk['page'],
                 'type': chunk['type'],
-                'relevance_score': result['score']
+                'relevance_score': result.get('score', 0.0),
+                'content_preview': chunk['content'][:100] + "..." if len(chunk['content']) > 100 else chunk['content']
             })
 
         return {
             'answer': answer,
             'citations': citations,
-            'context_used': len(search_results)
+            'context_used': len(top_chunks),
+            'fallback_used': True
         }
 
 if __name__ == "__main__":

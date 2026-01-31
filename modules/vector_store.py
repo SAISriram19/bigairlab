@@ -10,7 +10,22 @@ from modules import config
 logger = logging.getLogger(__name__)
 
 class VectorStore:
+    """
+    Hybrid vector store combining dense embeddings and sparse keyword search.
+    
+    Features:
+    - FAISS for semantic similarity search
+    - BM25 for keyword matching
+    - Reciprocal Rank Fusion for result combination
+    """
+    
     def __init__(self, model_name=config.EMBEDDING_MODEL):
+        """
+        Initialize vector store with embedding model.
+        
+        Args:
+            model_name: Name of the sentence transformer model to use
+        """
         logger.info(f"Loading embedding model: {model_name}")
         self.embeddings = HuggingFaceEmbeddings(
             model_name=model_name,
@@ -55,89 +70,184 @@ class VectorStore:
 
         logger.info(f"FAISS index created with {len(documents)} vectors")
 
-    def search(self, query, k=5):
+    def search(self, query, k=config.SEARCH_K):
+        """
+        Hybrid search combining vector similarity and keyword matching.
+        
+        Args:
+            query: Search query string
+            k: Number of results to return
+            
+        Returns:
+            List of search results with chunks and relevance scores
+        """
         if self.vectorstore is None:
             logger.warning("Vectorstore not created")
             return []
             
-        # 1. Vector Search
-        vector_results = self.vectorstore.similarity_search_with_score(query, k=k*2)
+        # 1. Vector Search (semantic similarity)
+        try:
+            vector_results = self.vectorstore.similarity_search_with_score(query, k=k*2)
+        except Exception as e:
+            logger.error(f"Vector search failed: {e}")
+            vector_results = []
         
         # 2. Keyword Search (BM25)
-        tokenized_query = query.lower().split()
+        bm25_scores = []
         if self.bm25:
-            bm25_scores = self.bm25.get_scores(tokenized_query)
+            try:
+                tokenized_query = query.lower().split()
+                bm25_scores = self.bm25.get_scores(tokenized_query)
+            except Exception as e:
+                logger.error(f"BM25 search failed: {e}")
+                bm25_scores = [0] * len(self.chunks)
         else:
             logger.warning("BM25 index not found, skipping keyword search")
             bm25_scores = [0] * len(self.chunks)
 
-        top_bm25_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:k*2]
+        # Get top BM25 results
+        top_bm25_indices = sorted(
+            range(len(bm25_scores)), 
+            key=lambda i: bm25_scores[i], 
+            reverse=True
+        )[:k*2]
         
-        # 3. Combine Results (RRF - Reciprocal Rank Fusion)
-        # Create a map of chunk_id -> score
+        # 3. Reciprocal Rank Fusion (RRF)
         fused_scores = {}
+        rrf_constant = 60  # Standard RRF constant
         
-        # Process Vector Results
-        for rank, (doc, score) in enumerate(vector_results):
+        # Process Vector Results (lower distance = higher relevance)
+        for rank, (doc, distance) in enumerate(vector_results):
             chunk_id = doc.metadata.get('chunk_id')
             if chunk_id is not None:
-                 # Note: FAISS returns distance (lower is better) but we treat rank 0 as best
-                fused_scores[chunk_id] = fused_scores.get(chunk_id, 0) + (1 / (rank + 60))
+                # Convert distance to similarity-like score
+                vector_score = 1 / (rank + rrf_constant)
+                fused_scores[chunk_id] = fused_scores.get(chunk_id, 0) + vector_score
             
-        # Process BM25 Results
+        # Process BM25 Results (higher score = higher relevance)
         for rank, idx in enumerate(top_bm25_indices):
             if idx < len(self.chunks):
-                chunk_id = idx # In our case chunk_id corresponds to index in self.chunks
-                fused_scores[chunk_id] = fused_scores.get(chunk_id, 0) + (1 / (rank + 60))
+                bm25_score = 1 / (rank + rrf_constant)
+                fused_scores[idx] = fused_scores.get(idx, 0) + bm25_score
             
-        # Sort by fused score
-        sorted_chunk_ids = sorted(fused_scores.keys(), key=lambda x: fused_scores[x], reverse=True)[:k]
+        # Sort by fused score and take top k
+        sorted_chunk_ids = sorted(
+            fused_scores.keys(), 
+            key=lambda x: fused_scores[x], 
+            reverse=True
+        )[:k]
         
+        # Format results
         formatted_results = []
         for rank, chunk_id in enumerate(sorted_chunk_ids):
-            chunk = self.chunks[chunk_id]
-            formatted_results.append({
-                'chunk': chunk,
-                'score': fused_scores[chunk_id], # RRF score
-                'rank': rank + 1
-            })
+            if chunk_id < len(self.chunks):
+                chunk = self.chunks[chunk_id]
+                formatted_results.append({
+                    'chunk': chunk,
+                    'score': fused_scores[chunk_id],
+                    'rank': rank + 1,
+                    'chunk_id': chunk_id
+                })
 
+        logger.info(f"Search returned {len(formatted_results)} results for query: {query[:50]}...")
         return formatted_results
 
     def save(self, filepath='vector_store'):
+        """
+        Save vector store and associated data to disk.
+        
+        Args:
+            filepath: Base path for saving files
+        """
         if self.vectorstore is None:
             logger.error("No vectorstore to save")
             return
-        self.vectorstore.save_local(filepath)
-
-        # Save chunks and BM25 object
-        with open(f"{filepath}_data.pkl", 'wb') as f:
-            pickle.dump({
+            
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Save FAISS index
+            self.vectorstore.save_local(filepath)
+            
+            # Save chunks and BM25 as JSON (more robust than pickle)
+            import json
+            data_file = f"{filepath}_data.json"
+            
+            # Prepare data for JSON serialization
+            save_data = {
                 'chunks': self.chunks,
-                'bm25': self.bm25
-            }, f)
-        logger.info(f"Vector store data saved to {filepath}_data.pkl")
+                'bm25_corpus': [chunk['content'].lower().split() for chunk in self.chunks] if self.chunks else []
+            }
+            
+            with open(data_file, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+                
+            logger.info(f"Vector store saved to {filepath}")
+            logger.info(f"Metadata saved to {data_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save vector store: {e}")
+            raise
 
     def load(self, filepath='vector_store'):
-        logger.info(f"Loading vector store from {filepath}")
-        self.vectorstore = FAISS.load_local(
-            filepath,
-            self.embeddings,
-            allow_dangerous_deserialization=True
-        )
+        """
+        Load vector store and associated data from disk.
         
-        if os.path.exists(f"{filepath}_data.pkl"):
-            with open(f"{filepath}_data.pkl", 'rb') as f:
-                data = pickle.load(f)
-                self.chunks = data.get('chunks', [])
-                self.bm25 = data.get('bm25') # Load pre-built BM25
-                logger.info("Loaded chunks and cached BM25 index")
-        elif os.path.exists(f"{filepath}_chunks.pkl"): # Legacy fallback
-             with open(f"{filepath}_chunks.pkl", 'rb') as f:
-                self.chunks = pickle.load(f)
-                logger.warning("Loaded legacy chunks file. Rebuilding BM25...")
-                tokenized_corpus = [chunk['content'].lower().split() for chunk in self.chunks]
-                self.bm25 = BM25Okapi(tokenized_corpus)
+        Args:
+            filepath: Base path for loading files
+        """
+        logger.info(f"Loading vector store from {filepath}")
+        
+        try:
+            # Load FAISS index
+            self.vectorstore = FAISS.load_local(
+                filepath,
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            
+            # Try to load JSON data first (new format)
+            json_data_file = f"{filepath}_data.json"
+            if os.path.exists(json_data_file):
+                import json
+                with open(json_data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.chunks = data.get('chunks', [])
+                    
+                    # Rebuild BM25 from corpus
+                    bm25_corpus = data.get('bm25_corpus', [])
+                    if bm25_corpus:
+                        self.bm25 = BM25Okapi(bm25_corpus)
+                    else:
+                        logger.warning("No BM25 corpus found, rebuilding from chunks")
+                        tokenized_corpus = [chunk['content'].lower().split() for chunk in self.chunks]
+                        self.bm25 = BM25Okapi(tokenized_corpus)
+                        
+                logger.info("Loaded chunks and BM25 index from JSON")
+                
+            # Fallback to pickle format (legacy)
+            elif os.path.exists(f"{filepath}_data.pkl"):
+                with open(f"{filepath}_data.pkl", 'rb') as f:
+                    data = pickle.load(f)
+                    self.chunks = data.get('chunks', [])
+                    self.bm25 = data.get('bm25')
+                    logger.info("Loaded chunks and BM25 index from pickle (legacy)")
+                    
+            # Final fallback - rebuild BM25 if only chunks exist
+            elif os.path.exists(f"{filepath}_chunks.pkl"):
+                with open(f"{filepath}_chunks.pkl", 'rb') as f:
+                    self.chunks = pickle.load(f)
+                    logger.warning("Loaded legacy chunks file. Rebuilding BM25...")
+                    tokenized_corpus = [chunk['content'].lower().split() for chunk in self.chunks]
+                    self.bm25 = BM25Okapi(tokenized_corpus)
+            else:
+                logger.error(f"No data files found for {filepath}")
+                raise FileNotFoundError(f"Vector store data not found at {filepath}")
+                
+        except Exception as e:
+            logger.error(f"Failed to load vector store: {e}")
+            raise
 
     
 if __name__ == "__main__":

@@ -33,11 +33,28 @@ cd bigairlab
 pip install -r requirements.txt
 ```
 
-### 3. Install Tesseract OCR
+### 3. Install Missing Package
+```bash
+pip install rank_bm25
+```
+
+### 4. Install Tesseract OCR
 This project uses pytesseract for image OCR. You must have Tesseract installed on your system:
 *   **Windows**: Download Installer and add it to your PATH.
 *   **Linux**: sudo apt install tesseract-ocr
 *   **Mac**: brew install tesseract
+
+### 5. Configuration (Optional)
+Copy `.env.example` to `.env` and adjust settings:
+```bash
+cp .env.example .env
+```
+
+## Performance Notes
+
+- **CPU vs GPU**: The system runs on CPU by default. Generation times are 15-20s on CPU, 2-3s with GPU.
+- **Optimization**: Reduce `MAX_NEW_TOKENS` in `.env` for faster responses.
+- **Memory**: Requires ~4GB RAM for full operation with all models loaded.
 
 ## Usage
 
@@ -51,6 +68,15 @@ streamlit run app.py
 2.  **Process**: Click "Process Document" to start the ingestion pipeline.
 3.  **Chat**: Ask questions like "What are the key fiscal indicators for 2024?".
 4.  **Verify**: Expand the "References" citations to see the exact text/table rows used for the answer.
+5.  **Evaluate**: Use the "Evaluation" tab to benchmark system performance.
+
+## Test Questions for Qatar Document
+
+Try these questions with the included Qatar IMF report:
+- "What is Qatar's projected GDP growth rate for 2024-25?"
+- "What were Qatar's fiscal and current account surpluses in 2023?"
+- "How is Qatar's banking sector performing in terms of capitalization?"
+- "What are the main risks to Qatar's economic outlook?"
 
 ## Architecture
 

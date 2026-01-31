@@ -18,7 +18,7 @@ def main():
     with open(config.CHUNKS_PATH, 'r', encoding='utf-8') as f:
         chunks = json.load(f)
 
-    print(f"✓ Loaded {len(chunks)} chunks")
+    print(f"Loaded {len(chunks)} chunks")
 
     text_count = sum(1 for c in chunks if c['type'] == 'text')
     table_count = sum(1 for c in chunks if c['type'] == 'table')
