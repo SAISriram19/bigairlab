@@ -84,13 +84,7 @@ For a deep dive into the system design, please refer to:
 *   [Technical Report](docs/Technical_Report.md)
 *   [Architecture Diagrams](docs/Architecture_Diagrams.md)
 
-## Development
 
-### Running Tests
-To run the automated test suite:
-```bash
-python -m pytest tests/
-```
 
 ## Project Structure
 
